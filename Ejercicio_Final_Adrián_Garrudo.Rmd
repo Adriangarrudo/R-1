@@ -1,0 +1,282 @@
+---
+title: "Ejercicio Final"
+author: "Adrián Garrudo"
+date: "17/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+LIBRERÍAS
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(corrplot)
+library(fastDummies)
+library(MASS)
+library(gapminder)
+library(missForest)
+library(glmnet)
+library(e1071)
+library(lattice)
+library(readr)
+```
+#ACTIVIDAD 1.Carga los datos. Realiza una inspección por variables de la distribución de aprobación de crédito en función de cada atributo visualmente. Realiza las observaciones pertinentes. ¿ Qué variables son mejores para separar los datos?
+
+```{r}
+df<-read.table('C:/Users/Adrián Garrudo/Desktop/MASTER/MODULOS/2-Modelos y aprendizaje estadístico usando R/FINAL/df.data',sep=",",stringsAsFactors=TRUE,na.strings="?",header=FALSE)
+
+df<-as.data.frame(df, row.names = NULL, optional = FALSE)
+
+#Estudio inicial base de datos y comprobación de la correcta carga de datos
+View(df)
+head(df)
+ncol(df)
+nrow(df)
+#Observamos los distintos tipos de variables que tenemos
+summary(df)
+str(df)
+sapply(df, class)
+#Comprobamos el número de Na´s que nos comenta la descripción del dataframe
+sapply(df, function(x) sum(is.na(x)))
+
+```
+Nos adelantamos a "Actividad 2" para no tener confusiones en el estudio,aplicamos la función MissForest al dataframe
+
+```{r}
+imp<-missForest(df,xtrue = df,verbose = TRUE,variablewise = TRUE)
+imp$OOBerror
+#El comando Missforest completa los Na´s a través de árboles de decisión, de esta
+#manera obtenemos valores más correctos y además nos puede indicar los errores de
+#predicción de cada variable, vemos que la mayoría tienen errores 0 o muy pequeños.
+df<-as.data.frame(imp$ximp)
+View(df)
+#Comprobamos que ya no hay Na´s
+sapply(df, function(x) sum(is.na(x)))
+
+```
+Recodificamos la variable objetivo para que la visualización sea mas intuitiva
+```{r}
+#Modificamos la variable objetivo, es la única variable de la que tenemos 
+#información suficiente como para definirla
+
+df$V16<-recode(as.character(df$V16),
+               "+"="1",
+               "-"="0") %>%as.factor
+```
+
+Pasamos a realizar el EDA
+
+```{r}
+#Dividimos el estudio según el tipo de variable que observemos: categórica o numérica
+
+table(df$V16)
+plot(df$V16)
+```
+
+VARIABLES EXPLICATIVAS CATEGÓRICAS
+```{r}
+ggplot(df, aes(V1, fill=V16))+geom_bar()
+#Se observa que predomina claramente la categoría "b" sobre la "a",dentro de cada categoría v16 representa aprox el 50% de la muestra
+ggplot(df,aes(V4, fill=V16))+geom_bar()
+table(df$V4)
+#En primer lugar la categoría "l" es insignificante, habrá que estudiar si conviene incluirla en el modelo o si no ayuda a la explicación de v16. Por otro lado "u" predomina sobre "y" y las proporciones de v16 son dispares
+ggplot(df,aes(V5, fill=V16))+geom_bar()+coord_flip()
+table(df$V5)
+#Caso parecio al anterior, hay que valorar si alguna categoría es prescindible "g" tiene más del triple del peso que "p" y la proporción de aprobación de crédito es de aproximadamente el 50% en "g" y del 30% en "p"
+ggplot(df,aes(V6, fill=V16))+geom_bar()
+#Es una variable con 14 categorías, destaca la "c" pasando a valores superiores a 125
+ggplot(df,aes(V7, fill=V16))+geom_bar()
+#Ambas variables (V6,V7) tienen bastantes categorías y el peso de aprobación de crédito varía depediendo de las categorías. Más adelante estudiaremos si deberíamos tratar de alguna forma la variable para que nos de valor al modelo
+ggplot(df,aes(V11, fill=V16))+geom_bar()
+#En esta variable vemos que hay demasiadas categorías, seguramente pierda el sentido de la categorización
+ggplot(df,aes(V13, fill=V16))+geom_bar()
+#Variable en la que el rechazo de aprobación de crédito es ligeramente superior, la categoría "g" tiene un peso mucho mayor que el resto
+```
+
+VARIABLES EXPLICATIVAS NUMÉRICAS
+```{r}
+#Para representar variables numéricas frente a la variable explicada vamos a usar
+#gráfico de cajas o bigote y en algunos caso además histogramas. 
+ggplot(df,aes(x=V2,y=V16))+geom_boxplot(color = 'slateblue', fill = 'skyblue2')+
+  coord_flip()
+#V2 se distribuye de una manera distinta dependiendo de si aceptan o no el crédito.En el caso de los individuos a los que no se acepta observamos como la mayoría de la muestra se acumula entre algo más de 20 puntos(primer cuartil) y sobre unos 35 puntos(tercer cuartil), dentro de la muestra encontramos un mayor número de "outliers" en comparación con los individuos a los que se aprueba el crédito en cambio, la mediana de ambos grupos es similar.Los individuos con crédito aprobado tienen una distribución más amplia de sus datos, ocupando casi 20 puntos de la variable X2.
+
+ggplot(df) + 
+  geom_histogram(binwidth = 0.5, aes(x = V2), fill = "salmon") + 
+  theme_minimal()
+#En el histograma confirmamos la distribución de V2, experimentando un máximo de casi 25 puntos.Siempre toma valores positivos. 
+
+ggplot(df,aes(x=V3,y=V16))+
+  geom_boxplot(color = 'darkblue', fill = 'cornflowerblue')+
+  coord_flip()
+#Podemos observar como se distribuyen los datos de la variable continua a través de la variable dicotómica. Para los individuos que se aprueba el crédito hay una mayor dispersión de V3, llegando a unos valores máximos mayores, con una variación de 10 puntos frente a las personas que se le niega el crédito.La mediana para los que aprueban es mayor y tiene menos "outliers"
+
+ggplot(df) + 
+  geom_histogram(binwidth = 0.5, aes(x = V3), fill = 'brown2') + 
+  theme_minimal()
+#Con respecto la distribución de V3 se observa que existe una mayor densidad de datos en valores de 0 a 30, tal y como podíamos ver en el boxplot, alcalzando máximos de más de 90 puntos.
+
+ggplot(df) + 
+  geom_histogram(binwidth = 0.5, aes(x = V8), fill = 'cadetblue') + 
+  theme_minimal()
+#En el caso de V8 vamos a observar primero su histograma, se observa que hay pocos valores con altos niveles de V8, llegando a máximos de casi 225 puntos, esta variable sufre una disminución drástica de sus niveles tal como va avanzando la distribución
+ggplot(df,aes(x=V8,y=V16))+
+  geom_boxplot(color = 'brown', fill = 'brown3')+
+  theme_classic()
+
+#Viendo el diagrama de cajas de V8, observamos que las personas a las que se le acepta el crédito experimentan un primer cuartil por encima de la mediana delas personas a las que no se le acepta el crédito y el tercer cuartil de los valores "0" está por debajo de la mediana de los valores de "1".Los individuos a los que se le deniega le crédito experimentan más "outliers"que a los que se le acepta, además a los que se acepta experimentan un máximo muy superior a los que se deniega, el mínimo en cambio es similar.
+
+ggplot(df,aes(x=V11,y=V16))+
+  geom_boxplot(color = 'darkblue', fill = 'cornflowerblue')+
+  coord_flip()
+#La distribución de V11 se acumula en los primeros valores, ya vimos que su media era de 2.4, sin embargo encontramos valores muy alejador, llegando a máximos de 67. A la mayoría de los individuos se les aprueba el crédito
+
+ggplot(df,aes(x=V14,y=V16))+
+  geom_boxplot(color = 'darkblue', fill = 'cornflowerblue')+
+  coord_flip()
+
+
+ggplot(df,aes(x=V15,y=V16))+geom_boxplot(color = 'darkblue', fill = 'cornflowerblue')
+
+#V15 tiene la mayor dispersión de valores de todo el dataframe, observamos que existen con valor 0 y datos outliers que toman valores de hasta 100.000.Estos datos nos distorsionan la visión de V15
+
+#Al no conocer el sentido económico de las variables podemos caer en error a la hora de seleccionar las mejores variables para separar los datos y al explicar el sentido de los mismos
+```
+#ACTIVIDAD 2.Prepara el dataset convenientemente e imputa los valores faltantes usando la librería `missForest`
+
+Los NA´s ya los hemos imputado en el paso anterior para que el EDA fuera más concreto.
+Para conocer mejor el comportamiento de las variables vamos a realizar un estudio de la normalidad y de la independencia de las variables explicativas frente a la explicada
+
+TEST NORMALIDAD VARIABLES NUMÉRICAS
+```{r}
+
+numericas<-df%>%dplyr::select(V2,V3,V8,V11,V14,V15)
+
+sapply(sample_n(numericas,690),function(x) round(shapiro.test(x)$p.value,3))
+
+#Ninguna tiene una distribución normal, no hay valores >0.05
+
+#Vamos a realizar una matriz de correlación y una matriz de dispersión para ver la relación que existe entre las variables
+corrplot(cor(numericas),
+         method="number",type="upper",
+         main="Matriz de correlación")
+
+#La relaciones más importantes son V2-V8,V8-V11
+pairs(numericas,
+      main="Matriz de dispersión",
+      pch=3, cex=0.6, col='dodgerblue2')
+#Con la dispersión podemos estudiar de mejor forma estas relaciones,
+#V2-V8: relación positiva
+#V8-V11: relación positiva pero menos clara
+```
+
+TEST DE INDEPENDENCIA PARA VARIABLES CATEGÓRICAS
+```{r}
+categoricas<-df%>%dplyr::select(V1,V4,V5,V6,V7,V9,V10,V12,V13)
+
+sapply(categoricas,function(x) round(chisq.test(table(x,df$V16))$p.value,2))
+#Estudiamos si las categorías tienen influencia en las categoría de la variable objetivo. Son todas dependientes excepto V1 y V12, por tanto, deberíamos plantearnos el hecho de modificar el dataset.
+```
+Pero es mejor contrastar estas decisiones con otro criterio más objetivo
+
+SELECCIÓN DE VARIABLES. STEPAIC
+```{r}
+#Creamos los modelos glm máximo y mínimo para hacer una selección de variables
+m1<-glm(V16~.,data=df, family=binomial)
+m0<-glm(V16~1,data=df, family=binomial)
+step<-stepAIC(m0,direction="both",scope = list(upper=m1,lowe=m0))
+step$formula
+#Irá combinando las variables hasta dar con el modelo con el AIC más bajo pasa de 950 a 436, con estas variables formularemos el modelo.
+#Seleccionamos las variables que nos ha dado el stepAIC
+df.select<-df %>% 
+  dplyr::select(V16,V9,V11,V15,V13,V5,V6,V14,V10)
+
+```
+#ACTIVIDAD 3.Divide el dataset tomando las primeras 590 instancias como train y las últimas 100 como test.
+
+```{r}
+#Separamos el dataset con las variables filtradas en train y test
+train<-df.select[0:590,]
+test<-df.select[591:nrow(df),]
+#Comprobamos que tienen la misma dimensión
+dim(test)
+dim(train)
+#Aplicamos model matrix ya que tenemos variables categóricas y numéricas, esta función genera dummies
+x_train<-model.matrix(V16~.,train)[,-1]
+head(x_train)
+y_train<-train$V16
+x_test<-model.matrix(V16~.,test)[,-1]
+y_test<-test$V16
+```
+#ACTIVIDAD 4. Entrena un modelo de regresión logística con regularización Ridge y Lasso en train seleccionando el que mejor **AUC** tenga. Da las métricas en test.
+
+```{r}
+#RIDGE. Comprime los coeficientes. Modelo suponiendo que 1 es la clase positiva
+ridge.model <- cv.glmnet(x_train, y_train, 
+                         family='binomial',alpha=0, parallel=TRUE, 
+                         standardize=TRUE, type.measure='auc',positive="1")
+
+#Los coeficientes que ofrece el modelo y las 100 distintas lambdas que genera el modelo por defecto
+coef(ridge.model)
+ridge.model$lambda
+
+#Representación del valor del logaritmo de lambda
+er.cv=cv.glmnet(x_train,y_train,alpha=0)
+plot(er.cv)
+
+#Buscamos el Lambda mínimo ya que es el coefciente que, en la ecuación de ridge,acompaña a los residuos del modelo
+ridge.model$lambda.min
+
+#Realizamos la prediccion
+#En un principio se realizó la predicción con 0.5 viendo que ambos modelos eran muy precisos y similares se ha cambiado a 0.2 ya que el modelo soportaba el cambio y así podíamos diferenciarlos mejor
+y_pred <- as.numeric(predict.glmnet(ridge.model$glmnet.fit,
+                                    newx=x_test, s=ridge.model$lambda.min)>.2)
+
+confusionMatrix(as.factor(y_test), as.factor(y_pred), mode="everything")
+#Observamos que el "Accuracy" es de 0.91, el modelo es muy preciso
+#Para definir bien el tipo de error en este caso deberíamos conocer el objetivo que persigue la entidad con este estudio. Podría ser captación de nuevos clientes para el departamento de crédictos o podrían estar intentando mejorar la calidad de los procesos minimizando el riesgo.
+#Si consideramos que lo que buscan es minimizar el riesgo de las operaciones podríamos decir que el error de tipo dos es predecir que sí se concede el créditocuando en realidad no debería concederse, aplicando el principio de prudencia.
+#El error de tipo 1, el menos grave,sería predecir que no se le condece cuando en realidad el crédito se aprobaría. Sería un acto prudente y minimizarían los riesgos.
+
+#LASSO.Hace 0 alguno de los coeficientes, realizamos el mismo estudio que en ridge
+lasso.model <- cv.glmnet(x_train, y_train, 
+                         family='binomial', alpha=1, parallel=TRUE,
+                         standardize=TRUE, type.measure='auc',positive="1")
+
+#Los coeficientes que ofrece el modelo y 
+#distintas lambdas que genera el modelo
+coef(lasso.model)
+lasso.model$lambda
+
+#Representación del valor del logaritmo de lambda
+el.cv=cv.glmnet(x_train,y_train,alpha=1)
+plot(el.cv)
+
+#Buscamos el Lambda mínimo 
+lasso.model$lambda.min
+
+#Realizamos la prediccion
+y_pred <- as.numeric(predict.glmnet(lasso.model$glmnet.fit,
+                                    newx=x_test, s=lasso.model$lambda.min)>.2)
+
+confusionMatrix(as.factor(y_test), as.factor(y_pred), mode="everything")
+#Siguiendo la línea del modelo de ridge podemos decir que lasso tiene una precisión similar pero ridge es ligeramente superior 0.9 y 0.91 respectivamente.Lasso tiene un mayor error de tipo 1, siendo el error de tipo 2 igual que Ridge
+
+#Por tanto, nos quedaríamos con el modelo de ridge ya que tiene menos errores de predicción
+```
+#ACTIVIDAD 5. Aporta los *log odds* de las variables predictoras sobre la variable objetivo.
+
+```{r}
+coef(ridge.model)
+
+#Ejemplo de interpretación, el coeficiente Beta ligado a la variable V9t es de aprox 0.41140 por tanto, e^0.41140= 1.5089. Es decir, un aumento de una unidad en la variable V9t la probabilidad de aceptar el credito crece en un 50.89%
+```
+#ACTIVIDAD 6. Si por cada verdadero positivo ganamos 100e y por cada falso positivo perdemos 20e. ¿Qué valor monetario generará el modelo teniendo en cuénta la matriz de confusión del modelo con mayor AUC (con las métricas en test)?
+
+VALORMONETARIO = (85+6)*100-(8+1)*20
+VALORMONETARIO
+
